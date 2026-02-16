@@ -1,0 +1,3 @@
+python-dotenv
+smolagents[litellm]==1.23.0
+gradio==6.2.0
