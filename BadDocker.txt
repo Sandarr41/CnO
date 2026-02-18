@@ -1,0 +1,15 @@
+FROM python:latest
+
+WORKDIR /app
+
+# Копируем весь проект (включая .git, .env и т.п.)
+COPY . .
+
+# Устанавливаем зависимости без фиксации версии
+RUN pip install -r requirements.txt
+
+# Открываем порт Gradio
+EXPOSE 7860
+
+# Запускаем от root
+CMD python main.py
