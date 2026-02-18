@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+
+  # Database service
+  db:
+    image: postgres:16-alpine
+    container_name: email_postgres_db
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - email_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Init service (one-time)
+  init-db:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: email-agent:latest
+    container_name: email_agent_init
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      python -c "
+      print('Initializing database...');
+      "
+    networks:
+      - email_network
+
+  # Main application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: email-agent:latest
+    container_name: email_agent_app
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      init-db:
+        condition: service_completed_successfully
+    ports:
+      - "7860:7860"
+    volumes:
+      - email_data:/app/data
+    command: python main.py
+    networks:
+      - email_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# Networks
+networks:
+  email_network:
+    name: email_network
+    driver: bridge
+
+# Volumes
+volumes:
+  db_data:
+    name: email_db_volume
+  email_data:
+    name: email_app_volume
