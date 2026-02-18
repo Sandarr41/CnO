@@ -1,115 +1,220 @@
-<img src="img/a2as-logo.png" width="1024">
+#  Приложение почтового агента
+##  Описание проекта
 
+Данное приложение представляет собой агентную систему с веб-интерфейсом (Gradio), которая:
 
-Practical implementation of A2AS framework on python, using smolagents for agents and gradio for web UI.
+Обрабатывает email-сообщения
 
-### Contents
+Поддерживает защищённый режим (A2AS)
 
-├── [Abstract](#abstract)<br>
-├── [Project description](#project-description)<br>
-├── [Project setup](#project-setup)<br>
-├── [Attack performing](#attack-performing)<br>
-├── [How A2AS is used here](#how-a2as-is-used-here)<br>
-├── [Acknowledgements](#acknowledgements)<br>
-└── [License](#license)
+Использует подпись и проверку целостности сообщений
 
-### Abstract
+Работает через web-интерфейс на порту 7860
 
-If we had to describe A2AS in a couple of sentences, we could say that it is a set of the most basic, and therefore universal principles for protecting your AI agents.
+В репозитории представлены два Dockerfile:
 
-The A2AS principles themselves are expressed in the form of the acronym BASIC.
+BadDocker — содержит плохие практики
 
-These principles do not depend on specific technologies, infrastructure, or the particular expertise of your team members, and can therefore be applied to any project. If you are interested, you can learn more about A2AS on their page: https://a2as.org/ 
+Dockerfile — production-ready версия
 
-However, because the A2AS principles are not tied to a specific implementation, they have a slightly vague description, which can leave developers unsure of where to start when it comes to applying A2AS in practice.
+## ❌ BadDocker — плохой вариант
 
-The goal of the current project is to contribute to examples of A2AS usage by showing our vision of how this framework can be applied in practice, which ultimately provides a clearer picture for developers who want to implement A2AS in their projects.
+```
+FROM python:latest
 
-### Project description
+WORKDIR /app
 
-The project is a Python application with smolagents for creating agents and gradio for creating a web UI.
+COPY . .
 
-When the application is launched, a web page with the following content becomes available at `http://127.0.0.1:7860`:
+RUN pip install -r requirements.txt
 
-<img src="img/web-ui-screenshot.png" width="1024">
+EXPOSE 7860
 
-The application's web interface consists of three main columns.
+CMD python main.py
 
-**The first (left) column** represents your mailbox with the address `user@goodcorp.ai`, containing both sent and received corporate emails from your colleagues.
+```
 
-**The second column (in the middle)** represents the interaction window with the AI assistant that helps you with your email. The assistant is an LLM agent that has access to the functions of reading emails from your mailbox and sending emails on your behalf. 
+## ❌ Плохие практики
 
-Also, you can choose one of two agents — a regular one and one protected by A2AS approaches. The switch above the dialog box is responsible for selecting the agent.
+### 1. Использование python:latest
 
-Finally, below the dialog box is a window for displaying agent logs, which shows the tools called by the agent and their parameters. This window allows us to check whether the agent has performed any malicious actions.
+Почему это плохо:
 
-**The third column (on the right)** represents a mailbox similar to the one in the first column, but on behalf of the hacker. Note that all emails sent by the hacker will be delivered to the user's mailbox, so there is no field for specifying the email recipient here.
+Билд становится невоспроизводимым
 
-### Project setup
+Образ может измениться без предупреждения
 
-This project supports two ways of connecting llm models: using hugging face, or using local model through LM Studio. 
+Возможны неожиданные падения CI/CD
 
-Before launching the project, you need to create a `.env` file in the root of the repository and fill it with the necessary data. As an example, you can use the `.env.example` file. Fill in the file according to the model connection method you are using.
+Правильный подход:
+Использовать фиксированную версию:
 
-### Attack performing
+FROM python:3.12.2-slim-bookworm
 
-It's time to attack! This project proposes an attack using a prompt injection hidden inside an email sent by a hacker to a user.
+### 2. COPY . . (копирование всего контекста)
 
-<details>
-    <summary>Here is an example of the steps to reproduce the attack (tap to open)</summary>
+Почему это плохо:
 
-1. **Ask agent a simple action.** 
+Копируются лишние файлы (.git, .env, тесты)
 
-Ask an unprotected agent if you have any upcoming meetings: “Do I have a meeting scheduled?” — the agent will gather information based on the available emails. The agent will successfully complete the request and respond to you based on the available emails.
+Возможна утечка секретов
 
-<img src="img/simple-action-1.png">
+Увеличивается размер образа
 
-2. **Send malicious email.** 
+Портится кеширование слоёв
 
-Next, on behalf of the hacker, send the user the email described in the `attack.txt` file in the current repository. This email contains a prompt injection and is disguised as spam.
+Правильный подход:
+Копировать только необходимые файлы:
 
-<img src="img/malicious-mail.png">
+COPY agent/ ./agent/
+COPY models/ ./models/
+COPY services/ ./services/
+COPY ui/ ./ui/
+COPY main.py .
 
-3. **Ask agent about action again.** 
+### 3. Отсутствие multi-stage сборки
 
-Ask the unprotected agent the question again: “Do I have a meeting scheduled?” This time, the hacker's email will be included in the agent's context because it contains the word “meeting,” and the agent will then execute the instructions in that email. The email contains instructions on how to leak your corporate token.
+Почему это плохо:
 
-<img src="img/simple-action-2.png">
+В образ попадают build-зависимости
 
-The agent can answer differently from time to time, either revealing that it has performed a malicious action or not.
+Образ становится тяжелее
 
-4. **Ensure that the agent has performed the malicious action.** 
- 
-Please note that a new item has appeared in the user's sent mail section — this is a letter with a token sent to the hacker's address. You can also check the agent logs below the dialog box to see if it called the mail sending tool:
+Медленнее деплой
 
-<img src="img/agent-execution-logs.png">
+Правильный подход:
+Использовать multi-stage:
 
-The attack was successful! Agent executed malicious instruction from the hacker's email and leaked our internal token. 
+Builder stage — установка зависимостей
 
-If you repeat the same algorithm with the protected agent (the switch is located above the dialog box), you will see that the agent refuses to follow the instructions in the malicious email:
+Runtime stage — только готовое окружение
 
-<img src="img/malicious-mail-refused.png">
+### 4. Запуск от root
 
-</details>
+По умолчанию контейнер запускается от root.
 
-### How A2AS is used here
+Почему это плохо:
 
-The protected agent implements all five BASIC principles:
+Повышенные риски безопасности
 
-⊹ **Behavior Certificates** are implemented through the `EmailBehaviorCertificates` class, which validates each tool call before execution. For example, sending emails is only allowed to addresses within the `@goodcorp.ai` domain, and emails containing token patterns are blocked.
+Возможность эскалации привилегий
 
-⊹ **Authenticated Prompts** use HMAC-SHA256 signing to verify that user messages have not been tampered with. The signature is generated when the user submits a prompt and verified before the agent processes it.
+Нарушение security best practices
 
-⊹ **Security Boundaries** isolate untrusted content using XML tags. User input is wrapped in `<a2as:user>` tags, making it clear to the model that this content should be treated as data, not as instructions.
+Правильный подход:
 
-⊹ **In-Context Defenses** are security meta-instructions embedded in the agent's system prompt within the `<a2as:defense>` section. These instructions explicitly tell the model to ignore any commands found inside emails or tool outputs and to reject prompt injection attempts.
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+USER appuser
 
-⊹ **Codified Policies** define application-specific rules in the `<a2as:policy>` section of the system prompt. These rules mirror the behavior certificates, creating defense-in-depth: even if the model tries to violate a policy, the code-level check will block the action.
+### 5. Отсутствие volume для хранения данных
 
-### Acknowledgements
+Файл emails.jsonl хранится внутри контейнера.
 
-Thanks to the Vladislav Tushkanov from Kaspersky AI Research Center. The initial design of the attack demonstration was inspired by his presentation “AI Agents vs. Prompt Injections” at BrigthTALK Oct 07 2025.
+Почему это плохо:
 
-## License
+При удалении контейнера данные теряются
 
-MIT License - Vladimir Grishchenko, 2026
+Контейнер становится stateful
+
+Невозможно масштабирование
+
+Правильный подход:
+
+VOLUME ["/app/data"]
+
+## ✅ Dockerfile — правильный вариант
+
+Основные улучшения:
+
+Фиксированная версия Python
+
+Использование slim-образа
+
+Multi-stage сборка
+
+Отдельное виртуальное окружение
+
+Non-root пользователь
+
+Volume для данных
+
+Healthcheck
+
+Минимальный размер образа
+
+### ✅ Почему этот вариант считается хорошей практикой
+
+- Воспроизводимость
+
+Зафиксированные версии → одинаковый результат сборки в любой среде.
+
+- Безопасность
+
+Контейнер не работает от root
+
+Минимальный базовый образ
+
+Нет лишних пакетов
+
+- Оптимизация размера
+
+Multi-stage удаляет build-зависимости.
+
+- Stateless архитектура
+
+Данные вынесены в volume.
+
+- Готовность к Kubernetes
+
+Контейнер stateless
+
+Можно подключить PersistentVolume
+
+Можно использовать readiness/liveness probes
+
+##  Использование volume
+
+Пример запуска:
+
+```
+docker run -p 7860:7860 \
+  -v email_data:/app/data \
+  email-agent
+```
+
+Теперь данные писем сохраняются вне контейнера.
+
+## ❌ Две плохие практики использования контейнеризации
+
+### 1. Использование контейнера как виртуальной машины
+
+Плохой подход:
+
+- Заходить в контейнер через docker exec
+
+- Устанавливать пакеты вручную
+
+- Изменять код внутри контейнера
+
+Почему это плохо:
+
+- Нарушается принцип immutable infrastructure
+
+- Невозможно воспроизвести окружение
+
+- Разные контейнеры начинают отличаться
+
+### Правильный подход:
+Все изменения должны происходить через Dockerfile → пересборка образа.
+
+### 2. Хранение данных внутри контейнера
+
+Если не использовать volume:
+
+- При docker rm данные удаляются
+
+- Невозможно масштабирование
+
+- Потеря данных при перезапуске
+
+- Контейнер должен быть stateless.
