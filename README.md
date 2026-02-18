@@ -1,218 +1,110 @@
-#  Приложение почтового агента
-##  Описание проекта
+# Kubernetes
+## 1. Перенос POSTGRES_USER и POSTGRES_PASSWORD в Secret
 
-Данный проект представляет собой multi-service архитектуру, реализованную с помощью docker-compose.yml.
 
-В состав входят:
-
-db — PostgreSQL база данных
-
-init-db — одноразовый init-сервис
-
-app — основное приложение (Email Agent + Gradio UI)
-
-Все сервисы работают в одной сети и взаимодействуют друг с другом.
-
-## Состав docker-compose.yml
-
-Файл включает:
-
-- 3 сервиса
-
-- автоматическую сборку образа
-
-- жесткие имена контейнеров
-
-- volume
-
-- healthcheck
-
-- depends_on
-
-- прокидывание портов
-
-- отдельный .env файл
-
-- общую сеть
-
-## Описание сервисов
-### 1. Сервис db
+postgres-secret.yml:
 ```
-db:
-  image: postgres:16-alpine
-  container_name: email_postgres_db
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+type: Opaque
+stringData:
+  POSTGRES_USER: "postgres"
+  POSTGRES_PASSWORD: "MySacredPasswordForPostgres!"
+```
+Обновление postgres-deployment.yml:
+```
+env:
+  - name: POSTGRES_USER
+    valueFrom:
+      secretKeyRef:
+        name: postgres-secret
+        key: POSTGRES_USER
+  - name: POSTGRES_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: postgres-secret
+        key: POSTGRES_PASSWORD
 ```
 
-Назначение:
+Скриншот 1 — вывод kubectl get secrets
 
-PostgreSQL база данных для хранения информации.
+<img src="kuber/img/get-secrets.png">
 
-Особенности:
-
-- Использует официальный образ PostgreSQL
-
-- Переменные окружения загружаются из .env
-
-- Используется volume:
+## 2. Перенос переменных Nextcloud в ConfigMap
+Создан nextcloud-configmap.yml
 ```
-volumes:
-  - db_data:/var/lib/postgresql/data
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nextcloud-configmap
+data:
+  NEXTCLOUD_UPDATE: "1"
+  ALLOW_EMPTY_PASSWORD: "yes"
+  POSTGRES_HOST: "postgres-service"
+  NEXTCLOUD_TRUSTED_DOMAINS: "127.0.0.1"
+  NEXTCLOUD_ADMIN_USER: "admin"
 ```
-
-Это обеспечивает сохранность данных при перезапуске контейнера.
-
-Healthcheck:
+Обновлён Deployment
 ```
-healthcheck:
-  test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
-```
-
-Контейнер считается готовым только после успешной проверки.
-
-### 2. Сервис init-db
-```
-init-db:
-  build:
-    context: .
-    dockerfile: Dockerfile
-  image: email-agent:latest
-  container_name: email_agent_init
-```
-Назначение:
-
-Одноразовый контейнер для инициализации базы данных.
-
-Особенности:
-
-- Использует тот же Dockerfile
-
-- Автоматически собирает образ
-
-- Имеет depends_on:
-```
-depends_on:
-  db:
-    condition: service_healthy
+envFrom:
+  - configMapRef:
+      name: nextcloud-configmap
 ```
 
-Выполняет команду через command
+Скриншот 2 — kubectl describe pod nextcloud-
+
+<img src="kuber/img/describe-pod-nextcloud.png">
+
+
+
+## 3. Добавлены Liveness и Readiness пробы
 ```
-command: python init_script.py
+readinessProbe:
+  httpGet:
+    path: /status.php
+    port: 80
+  initialDelaySeconds: 20
+  periodSeconds: 10
 ```
-
-После выполнения завершает работу.
-
-### 3. Сервис app
 ```
-app:
-  build:
-    context: .
-  image: email-agent:latest
-  container_name: email_agent_app
+livenessProbe:
+  httpGet:
+    path: /status.php
+    port: 80
+  initialDelaySeconds: 60
+  periodSeconds: 20
 ```
-Назначение:
+Скриншот 3 — kubectl describe pod
 
-Основное приложение (Gradio UI + агенты).
+<img src="kuber/img/probes.png">
 
-Особенности:
+## Ответы на доп вопросы
+### 1. Порядок применения манифестов
+Вопрос: важен ли порядок выполнения манифестов? Почему?
 
-- Жесткое имя контейнера
+ Да, порядок важен.
 
-- Проброс порта:
+Причина:
 
-```
-ports:
-  - "7860:7860"
-```
+Deployment использует ConfigMap и Secret.
 
-Volume:
-```
-volumes:
-  - email_data:/app/data
-```
+Если они ещё не созданы, Pod не сможет стартовать.
 
-depends_on:
-```
-depends_on:
-  db:
-    condition: service_healthy
-  init-db:
-    condition: service_completed_successfully
-```
+Kubernetes выдаст ошибку:
 
-Healthcheck:
-```
-healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:7860"]
-```
-## Network
-```
-networks:
-  email_network:
-    driver: bridge
-```
-
-Все сервисы подключены к одной сети:
-```
-networks:
-  - email_network
-```
-
-Это позволяет им обращаться друг к другу по имени сервиса (например, db).
-
-## Volumes
-```
-volumes:
-  db_data:
-  email_data:
-```
-
-db_data — хранит данные PostgreSQL
-
-email_data — хранит данные приложения
-
-Volumes делают контейнеры stateless.
-
-## .env
-
-Все переменные окружения вынесены в отдельный файл:
-```
-# -> Docker envs
-POSTGRES_USER=email_user
-POSTGRES_PASSWORD=email_password
-POSTGRES_DB=email_db
-APP_ENV=production
-```
-
-Это улучшает безопасность и упрощает конфигурацию.
+CreateContainerConfigError
 
 
-## Ответы на вопросы
-### Вопрос 1
-Можно ли ограничивать ресурсы (CPU, память) в docker-compose.yml?
 
- Да, можно.
-```
-app:
-  ...
-  mem_limit: 512m
-  cpus: 0.5
-```
-### Вопрос 2
+### 2. Что произойдет, если:
 
-Как запустить только один сервис из docker-compose.yml?
+Отскейлить Postgres до 0
 
-Можно указать имя сервиса:
-```
-docker compose up app
-```
+Затем обратно до 1
 
-Будет запущен только сервис app.
+После этого попробовать зайти в Nextcloud
 
-Если нужно запустить без зависимостей:
-
-```
-docker compose up --no-deps app
-```
-
-Это запустит только app, игнорируя depends_on.
+---
+Создаётся новый контейнер, база данных пустая -> все данные Nextcloud потеряны
