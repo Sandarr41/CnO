@@ -103,4 +103,8 @@ if __name__ == "__main__":
         chat_with_agent_fn=chat_with_agent,
         reset_agent_fn=reset_agent,
     )
-    demo.launch(share=False)
+    demo.launch(
+        share=False,
+        server_name="0.0.0.0",
+        server_port=7860
+    )

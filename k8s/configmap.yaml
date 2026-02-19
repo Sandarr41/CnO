@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: email-app
+  labels:
+    app: email-agent
+data:
+  APP_ENV: "production"
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+  MODEL_PROVIDER: "huggingface"
+  HUGGING_FACE_MODEL_ID: "Qwen/Qwen2.5-72B-Instruct"
